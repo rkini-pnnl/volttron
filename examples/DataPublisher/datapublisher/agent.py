@@ -201,7 +201,7 @@ class Publisher(Agent):
                 names = list(item.keys())
             self._data = self._input_data
         else:
-            handle = open(self._input_data)
+            handle = open(self._input_data, mode="r", encoding="utf-8-sig")
             self._data = csv.DictReader(handle)
             names = self._data.fieldnames[:]
 
@@ -267,7 +267,7 @@ class Publisher(Agent):
             topic, point = self._name_map[name]
 
             try:
-                parsed_value = float(value)
+                parsed_value = value
                 results[topic][point] = parsed_value
                 meta_results[topic][point] = self._meta_data[topic][point]
             except ValueError:
