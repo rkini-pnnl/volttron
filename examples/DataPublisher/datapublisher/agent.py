@@ -40,6 +40,8 @@ import datetime
 import logging
 import re
 import sys
+import dateutil.tz
+from dateutil.parser import parse
 
 from volttron.platform.vip.agent import *
 from volttron.platform.agent import utils
@@ -90,6 +92,7 @@ def DataPub(config_path, **kwargs):
     base_path = conf.get('basepath', "")
 
     input_data = conf.get('input_data', [])
+    timezone = conf.get("timezone", "")
 
     # unittype_map maps the point name to the proper units.
     unittype_map = conf.get('unittype_map', {})
@@ -106,6 +109,7 @@ def DataPub(config_path, **kwargs):
                      base_path=base_path,
                      input_data=input_data,
                      unittype_map=unittype_map,
+                     timezone=timezone,
                      max_data_frequency=max_data_frequency,
                      replay_data=replay_data,
                      remember_playback=remember_playback,
@@ -120,7 +124,7 @@ class Publisher(Agent):
     Configuration consists of csv file and publish topic
     '''
     def __init__(self, use_timestamp=False,
-                 publish_interval=5.0, base_path="", input_data=[], unittype_map={},
+                 publish_interval=5.0, base_path="", input_data=[], unittype_map={}, timezone="UTC",
                  max_data_frequency=None, replay_data=False, remember_playback=False,
                  reset_playback=False, topic_separator="/",
                  **kwargs):
@@ -132,6 +136,7 @@ class Publisher(Agent):
         self._data = []  # incoming data
         self._publish_interval = publish_interval
         self._use_timestamp = use_timestamp
+        self.timezone = timezone
         self._loop_greenlet = None
         self._next_allowed_publish = None
         self._max_data_frequency = None
@@ -150,6 +155,7 @@ class Publisher(Agent):
                                "replay_data": replay_data,
                                "max_data_frequency": max_data_frequency,
                                "remember_playback": self._remember_playback,
+                               "timezone": self.timezone,
                                "reset_playback": self._reset_playback,
                                "topic_separator": self._topic_separator}
 
@@ -176,8 +182,10 @@ class Publisher(Agent):
 
         self._publish_interval = config.get("publish_interval", 5.0)
         self._use_timestamp = config.get("use_timestamp", False)
-
         self._max_data_frequency = config.get("max_data_frequency", None)
+
+        self.timezone = config.get("timezone", "UTC")
+        _log.debug(f"Printing timezone value {self.timezone}")
 
         if self._max_data_frequency is not None:
             self._max_data_frequency = datetime.timedelta(seconds=self._max_data_frequency)
@@ -215,7 +223,7 @@ class Publisher(Agent):
         results = defaultdict(dict)
         for topic, point in name_map.values():
             unit_type = Publisher._get_unit(point, unittype_map)
-            results[topic][point] = unit_type
+            results[topic][point] = {"unit_type": unit_type}
         return results
 
     def build_maps(self, fieldnames, base_path):
@@ -252,9 +260,7 @@ class Publisher(Agent):
     def _publish_point_all(self, topic, data, meta_data, headers):
         # makesure topic+point gives a true value.
         all_topic = topic + "/all"
-
         message = [data, meta_data]
-
         self.vip.pubsub.publish(peer='pubsub',
                                 topic=all_topic,
                                 message=message,  # [data, {'source': 'publisher3'}],
@@ -267,7 +273,7 @@ class Publisher(Agent):
             topic, point = self._name_map[name]
 
             try:
-                parsed_value = value
+                parsed_value = float(value)
                 results[topic][point] = parsed_value
                 meta_results[topic][point] = self._meta_data[topic][point]
             except ValueError:
@@ -317,17 +323,18 @@ class Publisher(Agent):
                     continue
 
                 self._line_marker += 1
-                
+
                 if self._use_timestamp and "Timestamp" in row:
                     now = row['Timestamp']
                     if not self.check_frequency(now):
                         continue
+                    now = parse(now)
                 else:
                     now = utils.format_timestamp(datetime.datetime.now())
-
-                headers = {HEADER_NAME_DATE: now, HEADER_NAME_TIMESTAMP: now}
+                to_zone = dateutil.tz.gettz(self.timezone)
+                now = utils.format_timestamp(now.astimezone(to_zone))
+                headers = {HEADER_NAME_DATE: now, HEADER_NAME_TIMESTAMP: now,}
                 row.pop('Timestamp', None)
-
                 publish_values, publish_meta = self.build_publish_with_meta(row)
 
                 for topic, message in publish_values.items():
