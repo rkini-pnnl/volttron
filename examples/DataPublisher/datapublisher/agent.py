@@ -215,7 +215,6 @@ class Publisher(Agent):
 
         self._name_map = self.build_maps(names, base_path)
         self._meta_data = self.build_metadata(self._name_map, unittype_map)
-
         self._loop_greenlet = self.core.spawn(self.publish_loop)
 
     @staticmethod
@@ -271,13 +270,13 @@ class Publisher(Agent):
         meta_results = defaultdict(dict)
         for name, value in row.items():
             topic, point = self._name_map[name]
-
             try:
                 parsed_value = float(value)
                 results[topic][point] = parsed_value
                 meta_results[topic][point] = self._meta_data[topic][point]
             except ValueError:
-                _log.error(f"Missing parseable float value for topic {topic}/{point}")
+                pass
+                #_log.error(f"Missing parseable float value for topic {topic}/{point}")
             
         return results, meta_results
 
@@ -338,7 +337,9 @@ class Publisher(Agent):
                 publish_values, publish_meta = self.build_publish_with_meta(row)
 
                 for topic, message in publish_values.items():
-                    self._publish_point_all(topic, message, publish_meta[topic], headers)
+                    if list(message.values())[0]:
+                        _log.debug(f"topic = {topic} and message ={message}")
+                        self._publish_point_all(topic, message, publish_meta[topic], headers)
 
                 if self._remember_playback:
                     self.vip.config.set(LINE_MARKER_CONFIG, str(self._line_marker), send_update=False)
